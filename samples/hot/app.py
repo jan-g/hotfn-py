@@ -12,7 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from hotfn.http import main
+import hotfn.http.main as main
 
 
 @main.coerce_input_to_content_type
