@@ -12,13 +12,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import hotfn.http.main as main
+from hotfn.http import response
 
 
-@main.coerce_input_to_content_type
-def app(s):
-    return s
+# TODO(denismakogon): add HTTP version, headers, etc.
+class DispatchException(Exception):
 
+    def __init__(self, status, message):
+        """
 
-if __name__ == "__main__":
-    main.main(app)
+        :param status: HTTP status code
+        :param message: error message
+        """
+        self.status = status
+        self.message = message
+
+    def response(self):
+        return response.RawResponse(
+            (1, 1), self.status, 'ERROR', {}, self.message)

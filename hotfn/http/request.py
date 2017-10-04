@@ -14,6 +14,35 @@
 
 import urllib.parse
 
+from hotfn.http import errors
+
+
+class RequestContext(object):
+
+    def __init__(self, method=None, url=None,
+                 query_parameters=None, headers=None,
+                 version=None):
+        """
+        Request context here to be a placeholder
+        for request-specific attributes
+        :param method: HTTP request method
+        :type method: str
+        :param url: HTTP request URL
+        :type url: str
+        :param query_parameters: HTTP request query parameters
+        :type query_parameters: dict
+        :param headers: HTTP request headers
+        :type headers: dict
+        :param version: HTTP proto version
+        :type version: tuple
+        """
+        # TODO(xxx): app name, path, memory, type, config
+        self.method = method
+        self.url = url
+        self.query_parameters = query_parameters
+        self.headers = headers
+        self.version = version
+
 
 def readline(stream):
     """Read a line up until the \r\n termination
@@ -42,6 +71,11 @@ def readline(stream):
 class RawRequest(object):
 
     def __init__(self, stream):
+        """
+        Raw request constructor
+        :param stream: byte stream
+        :type stream: io.BytesIO[bytes]
+        """
         self.stream = stream
         self.body_stream = None
 
@@ -87,50 +121,64 @@ class RawRequest(object):
             # so had to consume all remaining input
             raise EOFError("Previous stream had no terminator")
 
-        top_line = readline(self.stream)
-        if len(top_line) == 0:
-            raise EOFError("No request supplied")
-        method, path, proto = top_line.rstrip().split(' ')
-        headers = {}
-        while True:
-            line = readline(self.stream).rstrip()
-            if len(line) == 0:
-                break
-            k, v = line.split(':', 1)
-            k = k.lower()
-            if k.startswith('fn_header_'):
-                k = k[len('fn_header_'):].replace('_', '-')
-            if k.lower() in headers:
-                headers[k.lower()] += ';' + v.strip()
+        try:
+            top_line = readline(self.stream)
+            if len(top_line) == 0:
+                raise EOFError("No request supplied")
+            method, path, proto = top_line.rstrip().split(' ')
+            headers = {}
+            while True:
+                line = readline(self.stream).rstrip()
+                if len(line) == 0:
+                    break
+                k, v = line.split(':', 1)
+                k = k.lower()
+                if k.startswith('fn_header_'):
+                    k = k[len('fn_header_'):].replace('_', '-')
+                if k.lower() in headers:
+                    headers[k.lower()] += ';' + v.strip()
+                else:
+                    headers[k.lower()] = v.strip()
+
+            major_minor = proto.upper().replace("HTTP/", "").split(".")
+            if len(major_minor) > 1:
+                major, minor = major_minor
             else:
-                headers[k.lower()] = v.strip()
+                major, minor = major_minor.pop(), "0"
 
-        major_minor = proto.upper().replace("HTTP/", "").split(".")
-        if len(major_minor) > 1:
-            major, minor = major_minor
-        else:
-            major, minor = major_minor.pop(), "0"
+            # todo: parse query parameters carefully
+            params = parse_query_params(path)
 
-        # todo: parse query parameters carefully
-        params = parse_query_params(path)
+            if headers.get('transfer-encoding', 'identity') == 'chunked':
+                self.body_stream = ChunkedStream(self.stream)
+            elif 'content-length' in headers:
+                self.body_stream = ContentLengthStream(
+                    self.stream, int(headers.get("content-length")))
+            else:
+                # With no way of knowing when the input is complete,
+                # we must read everything remaining
+                self.body_stream = self.stream
+                self.stream = None
 
-        if headers.get('transfer-encoding', 'identity') == 'chunked':
-            self.body_stream = ChunkedStream(self.stream)
-        elif 'content-length' in headers:
-            self.body_stream = ContentLengthStream(
-                self.stream, int(headers.get(
-                    "content-length", headers.get(
-                        "fn_header_content_length", 0))))
-        else:
-            # With no way of knowing when the input is complete,
-            # we must read everything remaining
-            self.body_stream = self.stream
-            self.stream = None
+            context = RequestContext(
+                method=method,
+                url=path,
+                query_parameters=params,
+                headers=headers,
+                version=(major, minor))
 
-        return method, path, params, headers, (major, minor), self.body_stream
+            return context, self.body_stream
+        except ValueError:
+            raise errors.DispatchException(500, "No request supplied")
 
 
 def parse_query_params(url):
+    """
+    Parses query parameters
+    :param url: request URL
+    :type url: str
+    :return:
+    """
     q = url.split('?')
     if len(q) < 2:
         return {}
@@ -138,7 +186,15 @@ def parse_query_params(url):
 
 
 class ContentLengthStream(object):
+
     def __init__(self, base_stream, length):
+        """
+        Request body content stream
+        :param base_stream: byte stream
+        :type base_stream: io.BytesIO
+        :param length: content length from request headers
+        :type length: int
+        """
         self.base_stream = base_stream
         self.length = length
         self.bytes_read = 0
@@ -176,7 +232,9 @@ class ContentLengthStream(object):
         return val
 
     def readable(self):
-        """ True if file was opened in a read mode. """
+        """
+        True if file was opened in a read mode.
+        """
         return True
 
     def readall(self, *args, **kwargs):
@@ -277,6 +335,11 @@ class ChunkedStream(object):
     its length is zero.
     """
     def __init__(self, base_stream):
+        """
+        Chunked stream reader
+        :param base_stream: byte stream
+        :type base_stream: io.BytesIO
+        """
         self.base_stream = base_stream
         self.closed = False
         self.eof = False
@@ -416,7 +479,9 @@ class ChunkedStream(object):
         raise OSError()
 
     def writable(self):
-        """ True if file was opened in a write mode. """
+        """
+        True if file was opened in a write mode
+        """
         return False
 
     def write(self):
@@ -430,17 +495,16 @@ class ChunkedStream(object):
         """
         raise OSError()
 
-    def __repr__(self):
-        """ Return repr(self). """
-        return "ContentLengthStream({}/{})".format(
-            self.bytes_read, self.length)
-
     @property
     def closefd(self):
-        """True if the file descriptor will be closed by close()."""
+        """
+        True if the file descriptor will be closed by close()
+        """
         return False
 
     @property
     def mode(self):
-        """String giving the file mode"""
+        """
+        String giving the file mode
+        """
         return "rb"

@@ -49,7 +49,7 @@ Build distribution package
 
 Steps::
 
-    python setup.py bdist_wheel
+    python setup.py stdist bdist_wheel
 
 
 Check install capability for the whell
@@ -67,8 +67,7 @@ Submit release to PYPI
 
 Steps::
 
-    python setup.py bdist_wheel register
-    python setup.py bdist_wheel upload
+    twine upload build/hotfn-X.X.X-py2.py3-none-any.whl
 
 
 Modify plugin dependencies
