@@ -14,6 +14,7 @@
 
 from cgi import parse_header
 import dill
+import io
 import os
 import requests
 import threading
@@ -70,19 +71,29 @@ class FlowClient(object):
         else:
             self.thread_id = thread
 
-    def post(self, path, headers=None, body=None):
-        return self.request('POST', path, headers=headers, body=body)
+    def post(self, path, headers=None, body=None, **kwargs):
+        return self.request('POST', path, headers=headers, body=body, **kwargs)
 
-    def get(self, path, body=None):
-        return self.request('GET', path, body=body)
+    def get_stream(self, path, body=None, **kwargs):
+        return self.request_stream('GET', path, body=body, **kwargs)
 
-    def request(self, method, path, headers=None, body=None):
+    def request(self, method, path, headers=None, body=None, **kwargs):
         if '{' in path:
-            path = path.format(flow=self.thread_id)
+            path = path.format(flow=self.thread_id, **kwargs)
         response = requests.request(method, self.base_url + path, headers=headers, data=body)
         response.raise_for_status()
         try:
             return response.headers, response.json()
+        except:
+            return response.headers, None
+
+    def request_stream(self, method, path, headers=None, body=None, **kwargs):
+        if '{' in path:
+            path = path.format(flow=self.thread_id, **kwargs)
+        response = requests.request(method, self.base_url + path, headers=headers, data=body)
+        response.raise_for_status()
+        try:
+            return response.headers, BytesIO(response.content)
         except:
             return response.headers, None
 
@@ -98,20 +109,44 @@ class FlowClient(object):
         return self
 
 
+class BytesIO(io.BytesIO):
+    def readall(self):
+        b = bytes()
+        while True:
+            part = self.read()
+            if part is None:
+                continue
+            if len(part) == 0:
+                return b
+            b += part
+
+
 def supply(fn):
     fns = dill.dumps(fn)
     print("dumping function, len(fns) is", len(fns), "and fns is", fns, file=sys.stderr)
-    h, b = _flow().createThread().post('/graph/{flow}/supply',
-                                       headers={'FnProject-DatumType': 'blob',
-                                                'content-type': 'application/python-serialized',
-                                                'content-length': str(len(fns)),
-                                                'FnProject-CodeLocation': '-',
-                                                },
-                                       body=fns)
+    h, b = _flow().post('/graph/{flow}/supply',
+                        headers={'FnProject-DatumType': 'blob',
+                                 'content-type': 'application/python-serialized',
+                                 'content-length': str(len(fns)),
+                                 'FnProject-CodeLocation': '-',
+                                 },
+                        body=fns)
 
     print("response:", h, b, file=sys.stderr)
-    fn.stage_id = h['fnproject-stageid']
-    return fn
+    return Stage(fn, stage_id=h['fnproject-stageid'])
+
+
+class Stage(object):
+    def __init__(self, fn, stage_id=None):
+        self.fn = fn
+        self.stage_id = stage_id
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+    def get(fn):
+        h, s = _flow().get_stream('/graph/{flow}/stage/{stage_id}', stage_id=fn.stage_id)
+        return read_datum(h, s)
 
 
 def read_datum(headers, body_stream):
@@ -398,16 +433,26 @@ def dispatch(app, context, data=None, loop=None):
                                              'fnproject-resultstatus': 'success',
                                              'content-type': 'application/python-serialized',
                                              },
-                              dill.dumps(result))
+                              result)
     except Exception as e:
         return frame_response(context, 500, {'fnproject-datumtype': 'blob',
                                              'fnproject-resultstatus': 'failure',
                                              'content-type': 'application/python-serialized',
                                              },
-                              dill.dumps(e))
+                              e)
 
 
-def frame_response(context, status, headers, body):
+def frame_response(context, status, headers, result):
+    if result is None:
+        body = bytes()
+        headers.update({'fnproject-datumtype': 'empty',
+                        })
+    else:
+        body = dill.dumps(result)
+        headers.update({'fnproject-datumtype': 'blob',
+                        'content-type': 'application/python-serialized',
+                        })
+
     h = "\r\n".join(name + ": " + headers[name] for name in headers)
     result = "HTTP/1.1 {status} INVOKED\r\n" \
              "Content-Length: {cl}\r\n" \
