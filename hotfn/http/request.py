@@ -126,19 +126,8 @@ class RawRequest(object):
             if len(top_line) == 0:
                 raise EOFError("No request supplied")
             method, path, proto = top_line.rstrip().split(' ')
-            headers = {}
-            while True:
-                line = readline(self.stream).rstrip()
-                if len(line) == 0:
-                    break
-                k, v = line.split(':', 1)
-                k = k.lower()
-                if k.startswith('fn_header_'):
-                    k = k[len('fn_header_'):].replace('_', '-')
-                if k.lower() in headers:
-                    headers[k.lower()] += ';' + v.strip()
-                else:
-                    headers[k.lower()] = v.strip()
+
+            headers, body_stream = read_headers(self.stream)
 
             major_minor = proto.upper().replace("HTTP/", "").split(".")
             if len(major_minor) > 1:
@@ -150,14 +139,14 @@ class RawRequest(object):
             params = parse_query_params(path)
 
             if headers.get('transfer-encoding', 'identity') == 'chunked':
-                self.body_stream = ChunkedStream(self.stream)
+                self.body_stream = ChunkedStream(body_stream)
             elif 'content-length' in headers:
                 self.body_stream = ContentLengthStream(
-                    self.stream, int(headers.get("content-length")))
+                    body_stream, int(headers.get("content-length")))
             else:
                 # With no way of knowing when the input is complete,
                 # we must read everything remaining
-                self.body_stream = self.stream
+                self.body_stream = body_stream
                 self.stream = None
 
             context = RequestContext(
@@ -170,6 +159,27 @@ class RawRequest(object):
             return context, self.body_stream
         except ValueError:
             raise errors.DispatchException(500, "No request supplied")
+
+
+def read_headers(stream):
+    """Read a header/body stream
+
+    Return a dictionary of headers, plus the stream containing the body
+    """
+    headers = {}
+    while True:
+        line = readline(stream).rstrip()
+        if len(line) == 0:
+            break
+        k, v = line.split(':', 1)
+        k = k.lower()
+        if k.startswith('fn_header_'):
+            k = k[len('fn_header_'):].replace('_', '-')
+        if k.lower() in headers:
+            headers[k.lower()] += ';' + v.strip()
+        else:
+            headers[k.lower()] = v.strip()
+    return headers, stream
 
 
 def parse_query_params(url):

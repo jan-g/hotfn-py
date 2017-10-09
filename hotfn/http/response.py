@@ -30,7 +30,7 @@ class RawResponse(object):
         :param http_headers: HTTP response headers
         :type http_headers: dict
         :param response_data: string representation of data
-        :type response_data: str
+        :type response_data: bytes
         """
 
         http_headers = http_headers if http_headers else {}
@@ -72,7 +72,7 @@ class RawResponse(object):
         }
         result = stream.write(
             self.PATTERN.format(**format_map).encode('utf-8') +
-            self.response_data + "\n".encode("utf-8"))
+            self.response_data)
         if flush:
             stream.flush()
         return result

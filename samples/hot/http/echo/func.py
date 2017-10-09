@@ -13,22 +13,7 @@
 #    under the License.
 
 from hotfn.http import worker
-
-
-@worker.coerce_input_to_content_type
-def app(context, **kwargs):
-    """
-    This is just an echo function
-    :param context: request context
-    :type context: hotfn.http.request.RequestContext
-    :param kwargs: contains request body by `data` key,
-    in case of coroutine contains event loop by `loop` key
-    :type kwargs: dict
-    :return: echo of request body
-    :rtype: object
-    """
-    return kwargs.get("data")
-
+import app
 
 if __name__ == "__main__":
-    worker.run(app)
+    worker.run(app.app)

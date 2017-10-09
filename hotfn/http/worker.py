@@ -25,6 +25,7 @@ import traceback
 from hotfn.http import errors
 from hotfn.http import request
 from hotfn.http import response
+from hotfn.http import flow
 
 
 def run(app, loop=None):
@@ -41,11 +42,18 @@ def run(app, loop=None):
             with os.fdopen(sys.stdout.fileno(), 'wb') as stdout:
                 rq = request.RawRequest(stdin)
                 while True:
+                    print("Looping", file=sys.stderr)
                     try:
                         context, data = rq.parse_raw_request()
-                        rs = normal_dispatch(app, context,
-                                             data=data, loop=loop)
-                        rs.dump(stdout)
+                        print("Headers for request are:", context.headers, file=sys.stderr)
+                        if 'fnproject-flowid' in context.headers:
+                            print("Dispatching continuation:", context.headers, file=sys.stderr)
+                            rs = flow.dispatch(app, context, data=data, loop=loop)
+                            rs.dump(stdout)
+                        else:
+                            rs = normal_dispatch(app, context,
+                                                 data=data, loop=loop)
+                            rs.dump(stdout)
                     except EOFError:
                         # The Fn platform has closed stdin; there's no way to
                         # get additional work.
@@ -59,6 +67,7 @@ def run(app, loop=None):
                         response.RawResponse(
                             (1, 1), 500, "Internal Server Error",
                             {}, str(ex)).dump(stdout)
+                    sys.stderr.flush()
 
 
 def normal_dispatch(app, context, data=None, loop=None):
@@ -76,6 +85,7 @@ def normal_dispatch(app, context, data=None, loop=None):
     :rtype: response.RawResponse
     """
     try:
+        flow.set_flow(function_id=context.headers['fn_app_name'] + context.headers['fn_path'])
         rs = app(context, data=data, loop=loop)
         if isinstance(rs, response.RawResponse):
             return rs
@@ -92,9 +102,11 @@ def normal_dispatch(app, context, data=None, loop=None):
             return response.RawResponse(
                 context.version, 200, 'OK',
                 {'content-type': 'application/json'}, json.dumps(rs))
+        flow.clear_flow(True)
     except errors.DispatchException as e:
         return e.response()
     except Exception as e:
+        traceback.print_exc(file=sys.stderr)
         return response.RawResponse(
             context.version, 500, 'ERROR', {}, str(e))
 
