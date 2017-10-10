@@ -20,20 +20,31 @@ def app(context, data=None, **kwargs):
     """
     This function demonstrates the asynchronous invocation of multiple
     continuations using the Fn Flow invoker.
+
+    Run with:
+        echo '"baz"' | fn call app_name /hotfnpy-hot
     """
     @flow.supply
     def fn1():
         return "foo"
 
+    @fn1.then
+    def fn1b(arg):
+        return arg + " "
+
     @flow.supply
     def fn2():
         return "bar"
 
-    both = flow.all_of(fn1, fn2)
+    @fn2.then
+    def fn2b(arg):
+        return arg + "; "
+
+    both = flow.all_of(fn1b, fn2b)
 
     @both.then
     def fn3():
-        return fn1.get() + fn2.get() + data
+        return fn1b.get() + fn2b.get() + data
 
     return fn3.get()
 
