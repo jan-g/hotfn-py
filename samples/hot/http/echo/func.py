@@ -32,7 +32,7 @@ def app(context, data=None, **kwargs):
     both = flow.all_of(fn1, fn2)
 
     @both.then
-    def fn3(arg):
+    def fn3():
         return fn1.get() + fn2.get() + data
 
     return fn3.get()

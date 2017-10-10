@@ -14,6 +14,7 @@
 
 from cgi import parse_header
 import dill
+import inspect
 import io
 import os
 import requests
@@ -153,23 +154,42 @@ class Stage(object):
 
     def get(fn):
         h, s = _flow().get_stream('/graph/{flow}/stage/{stage_id}', stage_id=fn.stage_id)
+        if h.get('fnproject-resultstatus', 'success') == 'failure':
+            raise CompletionError(read_datum(h, s))
         return read_datum(h, s)
 
+    def then_run(fn, f):
+        return fn._then(f, type='thenRun')
+
+    def then_apply(fn, f):
+        return fn._then(f, type='thenApply')
+
     def then(fn, f):
+        if len(inspect.signature(f).parameters) == 0:
+            return fn.then_run(f)
+        else:
+            return fn.then_apply(f)
+
+    def _then(fn, f, type):
         fns = dill.dumps(f)
         print("dumping function, len(fns) is", len(fns), "and fns is", fns,
               file=sys.stderr)
-        h, b = _flow().post('/graph/{flow}/stage/{stage_id}/thenApply',
+        h, b = _flow().post('/graph/{flow}/stage/{stage_id}/{type}',
                             headers={'FnProject-DatumType': 'blob',
                                      'content-type': 'application/python-serialized',
                                      'content-length': str(len(fns)),
                                      'FnProject-CodeLocation': '-',
                                      },
                             body=fns,
-                            stage_id=fn.stage_id)
+                            stage_id=fn.stage_id,
+                            type=type)
 
         print("response:", h, b, file=sys.stderr)
         return Stage(fn=f, stage_id=h['fnproject-stageid'])
+
+
+class CompletionError(Exception):
+    pass
 
 
 def read_datum(headers, body_stream):

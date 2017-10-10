@@ -92,12 +92,11 @@ def normal_dispatch(app, context, data=None, loop=None):
         elif isinstance(rs, types.CoroutineType):
             return loop.run_until_complete(rs)
         elif isinstance(rs, str):
-            return response.RawResponse(context.version, 200, 'OK', {}, rs)
+            return response.RawResponse(context.version, 200, 'OK', {}, rs.encode('utf-8'))
         elif isinstance(rs, bytes):
             return response.RawResponse(
                 context.version, 200, 'OK',
-                {'content-type': 'application/octet-stream'},
-                rs.decode("utf8"))
+                {'content-type': 'application/octet-stream'}, rs)
         else:
             return response.RawResponse(
                 context.version, 200, 'OK',
