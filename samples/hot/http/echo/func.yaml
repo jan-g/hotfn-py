@@ -1,5 +1,5 @@
 name: test/hotfn
-version: 0.0.62
+version: 0.0.72
 runtime: python3
 format: http
 timeout: 100

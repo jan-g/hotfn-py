@@ -102,13 +102,14 @@ def normal_dispatch(app, context, data=None, loop=None):
             return response.RawResponse(
                 context.version, 200, 'OK',
                 {'content-type': 'application/json'}, json.dumps(rs))
-        flow.clear_flow(True)
     except errors.DispatchException as e:
         return e.response()
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
         return response.RawResponse(
             context.version, 500, 'ERROR', {}, str(e))
+    finally:
+        flow.clear_flow(True)
 
 
 def coerce_input_to_content_type(request_data_processor):

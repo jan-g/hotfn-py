@@ -136,8 +136,15 @@ def supply(fn):
     return Stage(fn, stage_id=h['fnproject-stageid'])
 
 
+def all_of(*stages):
+    h, b = _flow().post("/graph/{flow}/allOf?cids={stage_ids}",
+                        stage_ids=",".join(stage.stage_id for stage in stages))
+
+    return Stage(stage_id=h['fnproject-stageid'])
+
+
 class Stage(object):
-    def __init__(self, fn, stage_id=None):
+    def __init__(self, fn=None, stage_id=None):
         self.fn = fn
         self.stage_id = stage_id
 
@@ -147,6 +154,22 @@ class Stage(object):
     def get(fn):
         h, s = _flow().get_stream('/graph/{flow}/stage/{stage_id}', stage_id=fn.stage_id)
         return read_datum(h, s)
+
+    def then(fn, f):
+        fns = dill.dumps(f)
+        print("dumping function, len(fns) is", len(fns), "and fns is", fns,
+              file=sys.stderr)
+        h, b = _flow().post('/graph/{flow}/stage/{stage_id}/thenApply',
+                            headers={'FnProject-DatumType': 'blob',
+                                     'content-type': 'application/python-serialized',
+                                     'content-length': str(len(fns)),
+                                     'FnProject-CodeLocation': '-',
+                                     },
+                            body=fns,
+                            stage_id=fn.stage_id)
+
+        print("response:", h, b, file=sys.stderr)
+        return Stage(fn=f, stage_id=h['fnproject-stageid'])
 
 
 def read_datum(headers, body_stream):
@@ -168,6 +191,8 @@ def read_datum(headers, body_stream):
             all = body_stream.readall()
             print("Deserialising object - read", len(all), "bytes", file=sys.stderr)
             return dill.loads(all)
+        elif datum_type == 'empty':
+            return None
         else:
             print("Unknown datum:", mime_type, params, datum_type, file=sys.stderr)
             raise OSError("Unknown datum")
@@ -440,6 +465,8 @@ def dispatch(app, context, data=None, loop=None):
                                              'content-type': 'application/python-serialized',
                                              },
                               e)
+    finally:
+        clear_flow()
 
 
 def frame_response(context, status, headers, result):
