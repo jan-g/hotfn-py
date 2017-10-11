@@ -46,7 +46,18 @@ def app(context, data=None, **kwargs):
     def fn3():
         return fn1b.get() + fn2b.get() + data
 
-    return fn3.get()
+    # thenCompose constructs graph stages later on
+    stage = flow.value(1)
+
+    @stage.then_compose
+    def stage_2(value):
+        @flow.supply
+        def supplier():
+            return value
+
+        return supplier
+
+    return fn3.get() + str(stage_2.get())
 
 
 if __name__ == "__main__":

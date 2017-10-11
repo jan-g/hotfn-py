@@ -137,6 +137,13 @@ def supply(fn):
     return Stage(fn, stage_id=h['fnproject-stageid'])
 
 
+def value(v):
+    """Supply a pre-computed value as a stage result"""
+    h, b = serialize_for_flow(v)
+    h, b = _flow().post('/graph/{flow}/supply', headers=h, body=b)
+    return Stage(stage_id=h['fnproject-stageid'])
+
+
 def all_of(*stages):
     h, b = _flow().post("/graph/{flow}/allOf?cids={stage_ids}",
                         stage_ids=",".join(stage.stage_id for stage in stages))
@@ -186,6 +193,18 @@ class Stage(object):
 
         print("response:", h, b, file=sys.stderr)
         return Stage(fn=f, stage_id=h['fnproject-stageid'])
+
+    def then_compose(fn, f):
+        return fn._then(f, 'thenCompose')
+
+    def __flow__(fn):
+        """Serialise this stage as an output result of fn flow.
+
+        This function should return a dictionary of headers plus bytes for the body
+        """
+        return {'FnProject-DatumType': 'stageref',
+                'FnProject-StageID': fn.stage_id,
+                }, bytes()
 
 
 class CompletionError(Exception):
@@ -474,31 +493,31 @@ def dispatch(app, context, data=None, loop=None):
         result = args[0](*args[1:])
         print("Result is", result, file=sys.stderr)
 
-        return frame_response(context, 200, {'fnproject-datumtype': 'blob',
-                                             'fnproject-resultstatus': 'success',
-                                             'content-type': 'application/python-serialized',
-                                             },
-                              result)
+        return frame_response(context, 200,
+                              {'fnproject-resultstatus': 'success'}, result)
     except Exception as e:
-        return frame_response(context, 500, {'fnproject-datumtype': 'blob',
-                                             'fnproject-resultstatus': 'failure',
-                                             'content-type': 'application/python-serialized',
-                                             },
-                              e)
+        return frame_response(context, 500,
+                              {'fnproject-resultstatus': 'failure'}, e)
     finally:
         clear_flow()
 
 
-def frame_response(context, status, headers, result):
+def serialize_for_flow(result):
     if result is None:
-        body = bytes()
-        headers.update({'fnproject-datumtype': 'empty',
-                        })
+        return {'fnproject-datumtype': 'empty'}, bytes()
+    elif hasattr(result, '__flow__'):
+        return result.__flow__()
     else:
-        body = dill.dumps(result)
-        headers.update({'fnproject-datumtype': 'blob',
-                        'content-type': 'application/python-serialized',
-                        })
+        r = dill.dumps(result)
+        return {'fnproject-datumtype': 'blob',
+                'content-type': 'application/python-serialized',
+                'content-length': str(len(r)),
+                }, r
+
+
+def frame_response(context, status, headers, result):
+    h, body = serialize_for_flow(result)
+    headers.update(h)
 
     h = "\r\n".join(name + ": " + headers[name] for name in headers)
     result = "HTTP/1.1 {status} INVOKED\r\n" \
